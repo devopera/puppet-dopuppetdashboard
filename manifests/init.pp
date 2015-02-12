@@ -6,7 +6,13 @@ class dopuppetdashboard (
 
   $user = 'web',
   $group_name = 'www-data',
-  $port = 8080,
+  $port = 3000,
+  $puppetserver = 'localhost',
+
+  $db_host = 'localhost',
+  $db_name = 'puppetdash',
+  $db_user = 'puppetdash',
+  $db_pass = 'x90si2j47fgw',
 
   # by default, open this port in the firewall
   $firewall = true,
@@ -17,6 +23,7 @@ class dopuppetdashboard (
 
 ) {
 
+
   # open up firewall ports 
   if ($firewall) {
     class { 'dopuppetdashboard::firewall' :
@@ -25,27 +32,61 @@ class dopuppetdashboard (
   }
 
   # install required packages using OS package manager
-  package { ['rubygems', 'rubygem-rake', 'ruby-mysql']:
-    ensure => present,
+  if ! defined(Package['rubygems']) {
+    package { 'rubygems' :
+      ensure => present,
+      before => Anchor['dopuppetdashboard-deps-ready'],
+    }
+  }
+  if ! defined(Package['rubygem-rake']) {
+    package { 'rubygem-rake' : 
+      ensure => present,
+      before => Anchor['dopuppetdashboard-deps-ready'],
+    }
+  }
+  if ! defined(Package['ruby-mysql']) {
+    package { 'ruby-mysql' : 
+      ensure => present,
+      before => Anchor['dopuppetdashboard-deps-ready'],
+    }
+  }
+  anchor { 'dopuppetdashboard-deps-ready' : }
+
+  # install puppet dashboard package
+  #if ! defined(Package['puppet-dashboard']) {
+  #  package { 'puppet-dashboard' :
+  #    ensure => present,
+  #    require => Anchor['dopuppetdashboard-deps-ready'],
+  #    before => Anchor['dopuppetdashboard-package-ready'],
+  #  }
+  #}
+  #anchor { 'dopuppetdashboard-package-ready' : }
+
+  mysql::db { "${db_name}":
+    user     => $db_user,
+    password => $db_pass,
+    host     => $db_host,
+    grant    => ['SELECT', 'UPDATE'],
   }->
-  package { 'puppet-dashboard' :
-    ensure => present,
-  }
-  
-  # tell dashboard not to create a user/group
-  include 'dashboard::params'
-  User <| title == "${dashboard::params::dashboard_user}" |> {
-    noop => true,
-  }
-  Group <| title == "${dashboard::params::dashboard_group}" |> {
-    noop => true,
-  }
-  
+
+  exec { 'puppetdashboard_dbmigrate':
+    path      => '/usr/bin:/bin:/usr/sbin:/sbin',
+    command   => 'rake RAILS_ENV=production gems:refresh_specs && rake RAILS_ENV=production db:migrate',
+    cwd       => '/usr/share/puppet-dashboard/',
+  }->
+ 
   # install dashboard
-  class { 'dashboard':
-    dashboard_port => $port,
-    dashboard_user => $user,
-    dashboard_group => $group,
+  class { 'puppetdashboard':
+    db_host => $db_host,
+    db_port => 3306,
+    db_name => $db_name,
+    db_user => $db_user,
+    db_password => $db_pass,
+    setup_mysql => false,
+    ca_server => $puppetserver,
+    inventory_server => $puppetserver,
+    filebucket_server => $puppetserver,
+    port => $port,
   }
 
   # if we've got a message of the day, include it
